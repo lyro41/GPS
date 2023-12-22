@@ -3,11 +3,12 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"github.com/aclements/go-moremath/stats"
+	"github.com/kelindar/dbscan"
 	"image/color"
 	"math"
 	"os"
 
+	"github.com/aclements/go-moremath/stats"
 	"github.com/adrianmo/go-nmea"
 	dgStats "github.com/dgryski/go-onlinestats"
 	"gonum.org/v1/plot"
@@ -132,6 +133,73 @@ func CITest() {
 	}
 }
 
+type XY plotter.XY
+
+func (xy XY) DistanceTo(other dbscan.Point) float64 {
+	dx, dy := xy.X-other.(XY).X, xy.Y-other.(XY).Y
+	return math.Sqrt(dx*dx + dy*dy)
+}
+
+func (xy XY) Name() string {
+	return fmt.Sprintf("(%v, %v)", xy.X, xy.Y)
+}
+
+func DBScanTest(minDensity int, epsilon float64) {
+	p := plot.New()
+	p.X.Label.Text = "Latitude - 55.65342, deg"
+	p.Y.Label.Text = "Longitude - 37.55196, deg"
+	rmcs := Parse()
+	xys := make([]dbscan.Point, 0, len(rmcs))
+	for _, rmc := range rmcs {
+		fmt.Println(rmc)
+		xys = append(xys, XY{X: rmc.Latitude, Y: rmc.Longitude})
+	}
+	count := make(map[plotter.XY]int)
+	graphxys := make(plotter.XYs, 0, len(rmcs))
+	for _, xy := range xys {
+		count[plotter.XY(xy.(XY))] = count[plotter.XY(xy.(XY))] + 1
+		graphxys = append(graphxys, plotter.XY(xy.(XY)))
+	}
+	scan := dbscan.Cluster(minDensity, epsilon, xys...)
+	for _, v := range scan {
+		fmt.Println(v)
+	}
+	fmt.Println(len(scan))
+	reliable := make([]plotter.XY, 0, len(scan[0]))
+	for _, xy := range scan[0] {
+		reliable = append(reliable, plotter.XY(xy.(XY)))
+	}
+	allScatter := &plotter.Scatter{
+		XYs: graphxys,
+		GlyphStyleFunc: func(i int) draw.GlyphStyle {
+			return draw.GlyphStyle{
+				Color:  color.RGBA{R: 255, A: 255},
+				Radius: vg.Points(3 * float64(count[graphxys[i]])),
+				Shape:  draw.CircleGlyph{},
+			}
+		},
+	}
+	scatter := &plotter.Scatter{
+		XYs: reliable,
+		GlyphStyleFunc: func(i int) draw.GlyphStyle {
+			return draw.GlyphStyle{
+				Color:  color.RGBA{G: 255, A: 255},
+				Radius: vg.Points(3 * float64(count[reliable[i]])),
+				Shape:  draw.CircleGlyph{},
+			}
+		},
+	}
+	graph, err := plotter.NewLine(&graphxys)
+	if err != nil {
+		panic(err)
+	}
+	p.Add(graph, allScatter, scatter)
+	err = p.Save(1000, 1000, fmt.Sprintf("DBScan/%v-%v.png", minDensity, epsilon))
+	if err != nil {
+		panic(err)
+	}
+}
+
 func main() {
-	CITest()
+	DBScanTest(5, 3e-6)
 }
